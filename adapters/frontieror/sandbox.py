@@ -10,6 +10,22 @@ class SandboxConfigurationError(ValueError):
     pass
 
 
+def build_scope_command(command: list[str], mem_gb: int, cpu_cores: int) -> list[str]:
+    return [
+        "systemd-run",
+        "--user",
+        "--scope",
+        "-q",
+        "-p",
+        f"MemoryMax={mem_gb}G",
+        "-p",
+        "MemorySwapMax=0",
+        "-p",
+        f"CPUQuota={cpu_cores * 100}%",
+        *command,
+    ]
+
+
 def _required(path: str | Path, label: str) -> Path:
     resolved = Path(path).resolve()
     if not resolved.exists():

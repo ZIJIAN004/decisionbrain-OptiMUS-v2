@@ -55,6 +55,7 @@ PROBLEM_ROOT = Path(
 # independent scheduling decision and must account for aggregate host capacity.
 TASK_MEM_GB = 100
 LOGICAL_CPUS = 32
+PHYSICAL_CORES = 24
 JOBS = int(os.environ.get("ADAPTER_JOBS", "1"))
 BASELINE_PYTHON_ENV = Path(
     os.environ.get(
@@ -68,6 +69,12 @@ def solver_threads(jobs: int) -> int:
     if jobs < 1:
         raise ValueError("jobs must be at least 1")
     return max(1, LOGICAL_CPUS // jobs)
+
+
+def process_cpu_cores(jobs: int) -> int:
+    if jobs < 1:
+        raise ValueError("jobs must be at least 1")
+    return max(1, PHYSICAL_CORES // jobs)
 
 
 # Matches DecisionBrain's --task-timeout-seconds 7200. No inner solver limit is

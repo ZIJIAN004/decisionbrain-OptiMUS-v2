@@ -25,6 +25,7 @@ from . import config, manifest
 def _run_wrapper(
     command: list[str],
     mem_gb: int,
+    cpu_cores: int,
     timeout_s: int,
     log_path: Path,
     sandbox: dict | None = None,
@@ -36,6 +37,8 @@ def _run_wrapper(
         "adapters.frontieror.wrapper",
         "--mem-gb",
         str(mem_gb),
+        "--cpu-cores",
+        str(cpu_cores),
         "--timeout",
         str(timeout_s),
         "--cwd",
@@ -81,6 +84,7 @@ def process_case(
     paper_id: str,
     case: dict,
     mem_gb: int,
+    cpu_cores: int,
     solver_threads: int,
     log_dir: Path,
 ) -> dict:
@@ -127,6 +131,7 @@ def process_case(
             str(solver_threads),
         ],
         mem_gb=mem_gb,
+        cpu_cores=cpu_cores,
         timeout_s=config.TASK_TIMEOUT_SECONDS,
         log_path=log_dir / f"{paper_id}.log",
         sandbox={
@@ -162,6 +167,7 @@ def main() -> int:
 
     mem_gb = config.TASK_MEM_GB
     solver_threads = config.solver_threads(args.jobs)
+    cpu_cores = config.process_cpu_cores(args.jobs)
     for variable in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
         os.environ[variable] = str(solver_threads)
 
@@ -175,6 +181,7 @@ def main() -> int:
     print(
         f"{len(ordered)} cases | jobs={args.jobs} | {mem_gb} GB per task "
         f"| {solver_threads} solver threads per task "
+        f"| {cpu_cores} cgroup CPU cores per task "
         f"| {config.TASK_TIMEOUT_SECONDS}s wall",
         flush=True,
     )
@@ -189,7 +196,13 @@ def main() -> int:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
             futures = {
                 pool.submit(
-                    process_case, pid, case, mem_gb, solver_threads, log_dir
+                    process_case,
+                    pid,
+                    case,
+                    mem_gb,
+                    cpu_cores,
+                    solver_threads,
+                    log_dir,
                 ): pid
                 for pid, case in ordered
             }
