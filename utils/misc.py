@@ -3,10 +3,10 @@ Define templates for json file
 """
 
 import json
+import os
 from typing import List, Dict, Union
 import openai
 import numpy as np
-from mistralai.client import MistralClient
 
 
 INPUT_FIELD_DEF = "definition"
@@ -235,43 +235,40 @@ def sanity_check(state):
             raise KeyError(f"code is not defined for parameter {param['definition']}")
 
 
-def get_openai_client():
-    with open("config.json") as f:
-        config = json.load(f)
-    if len(config["openai_api_key"]) < 10:
-        raise ValueError("Please provide a valid OpenAI API key in config.json")
-    config["openai_api_key"]
-
-    client = openai.Client(
-        api_key=config["openai_api_key"], organization=config["openai_org_id"]
-    )
-
-    return client
+DEFAULT_LLM_BASE_URL = "https://api.deepseek.com/v1"
 
 
-def get_tai_client():
-    with open("config.json") as f:
-        config = json.load(f)
-    if len(config["together_api_key"]) < 10:
-        raise ValueError("Please provide a valid Together API key in config.json")
+def get_llm_client():
+    """One OpenAI-compatible client for every agent in the pipeline.
 
-    client = openai.OpenAI(
-        api_key=config["together_api_key"],
-        base_url="https://api.together.xyz",
-    )
+    Upstream builds three clients up front -- OpenAI, Together and Mistral --
+    and picks between them by model-name prefix, so running against a single
+    endpoint would fail at startup on the two unused keys. This evaluation runs
+    every agent on one endpoint, configured by environment variables that match
+    the names already used on the host.
+    """
+    key = os.environ.get("LLM_API_KEY") or os.environ.get("ADAPTER_API_KEY") or ""
+    url = os.environ.get("LLM_MODEL_URL") or DEFAULT_LLM_BASE_URL
 
-    return client
+    if not key and os.path.exists("config.json"):
+        with open("config.json") as f:
+            key = json.load(f).get("llm_api_key", "")
+
+    if len(key) < 10:
+        raise ValueError(
+            "No LLM API key. Set LLM_API_KEY (or add llm_api_key to config.json)."
+        )
+
+    # The OpenAI SDK appends /chat/completions itself.
+    base_url = url.removesuffix("/chat/completions").rstrip("/")
+    return openai.OpenAI(api_key=key, base_url=base_url)
 
 
-def get_mistral_client():
-    with open("config.json") as f:
-        config = json.load(f)
-    if len(config["mistral_api_key"]) < 10:
-        raise ValueError("Please provide a valid Mistral API key in config.json")
-
-    client = MistralClient(api_key=config["mistral_api_key"])
-
-    return client
+# Kept so the agent modules and run.py keep working unchanged; all three now
+# resolve to the same endpoint.
+get_openai_client = get_llm_client
+get_tai_client = get_llm_client
+get_mistral_client = get_llm_client
 
 
 if __name__ == "__main__":

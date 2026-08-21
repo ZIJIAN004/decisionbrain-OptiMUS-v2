@@ -1,7 +1,11 @@
 from typing import Dict, Optional, Union, List
+import openai
 from openai import Client, OpenAI
-from mistralai.client import MistralClient
-from mistralai.models.chat_completion import ChatMessage
+
+# Every agent now shares one OpenAI-compatible client (utils/misc.py:
+# get_llm_client), so the Mistral branch that used to live in llm_call is gone
+# along with its SDK import -- keeping it would make the whole pipeline depend
+# on a package it no longer calls.
 
 
 class Agent:
@@ -36,26 +40,23 @@ class Agent:
                 {"role": "user", "content": prompt},
             ]
 
-        if type(self.client) in [OpenAI, Client]:
+        try:
             completion = self.client.chat.completions.create(
                 model=model,
                 messages=messages,
                 seed=seed,
             )
-            content = completion.choices[0].message.content
-
-        elif type(self.client) == MistralClient:
-            messages = [
-                ChatMessage(role=message["role"], content=message["content"])
-                for message in messages
-            ]
-            completion = self.client.chat(
+        except (TypeError, openai.BadRequestError):
+            # Not every OpenAI-compatible endpoint accepts `seed`. Losing it
+            # costs reproducibility of individual replies, so it is dropped only
+            # when the endpoint refuses it, never pre-emptively. A 400 raised for
+            # any other reason will simply raise again on this second attempt.
+            completion = self.client.chat.completions.create(
                 model=model,
                 messages=messages,
             )
-            content = completion.choices[0].message.content
 
-        return content
+        return completion.choices[0].message.content
 
     def generate_reply(
         self,

@@ -25,7 +25,7 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-4-1106-preview",
+        default="deepseek-v4-flash",
         help="Base large language model",
     )
     parser.add_argument("--log_dir", type=str, help="Log directory")
@@ -38,16 +38,10 @@ def main():
     )
     args = parser.parse_args()
 
-    if not args.model in [
-        "gpt-4-1106-preview",
-        "gpt-3.5-turbo",
-        "mistralai/Mixtral-8x7B-Instruct-v0.1",
-        "mistral-medium",
-    ]:
-        print(
-            "Invalid model name! Please choose from 'gpt-4-1106-preview', 'gpt-3.5-turbo', 'mistralai/Mixtral-8x7B-Instruct-v0.1', 'mistral-medium'"
-        )
-        exit(0)
+    # Upstream whitelists four hosted models and routes each to its own vendor
+    # client. This evaluation runs every model through one OpenAI-compatible
+    # endpoint, so the name is passed through and the endpoint decides whether
+    # it is valid.
 
     dataset = args.dataset.lower()
     problem = args.problem
@@ -71,20 +65,7 @@ def main():
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
-    openai_client = get_openai_client()
-    tai_client = get_tai_client()
-    mistral_client = get_mistral_client()
-
-    openai_client = get_openai_client()
-    tai_client = get_tai_client()
-    mistral_client = get_mistral_client()
-
-    if args.model.startswith("gpt"):
-        client = openai_client
-    elif args.model.startswith("mistral-medium"):
-        client = mistral_client
-    else:
-        client = tai_client
+    client = get_llm_client()
 
     formulator = Formulator(
         client=client,
