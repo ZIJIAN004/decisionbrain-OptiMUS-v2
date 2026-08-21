@@ -54,6 +54,7 @@ PROBLEM_ROOT = Path(
 # Every evaluated process receives the same cgroup limit. Concurrency is an
 # independent scheduling decision and must account for aggregate host capacity.
 TASK_MEM_GB = 100
+LOGICAL_CPUS = 32
 JOBS = int(os.environ.get("ADAPTER_JOBS", "1"))
 BASELINE_PYTHON_ENV = Path(
     os.environ.get(
@@ -61,6 +62,13 @@ BASELINE_PYTHON_ENV = Path(
     )
 )
 GUROBI_HOME = Path(os.environ.get("GUROBI_HOME", "/home/bhz/gurobi1302/linux64"))
+
+
+def solver_threads(jobs: int) -> int:
+    if jobs < 1:
+        raise ValueError("jobs must be at least 1")
+    return max(1, LOGICAL_CPUS // jobs)
+
 
 # Matches DecisionBrain's --task-timeout-seconds 7200. No inner solver limit is
 # imposed: OptiMUS gets the full wall clock for solving, which favours the

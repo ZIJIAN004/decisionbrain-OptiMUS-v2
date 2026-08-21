@@ -39,6 +39,7 @@ def main():
     parser.add_argument(
         "--instance_path", type=str, help="Original structured instance"
     )
+    parser.add_argument("--solver_threads", type=int, default=32)
 
     parser.add_argument(
         "--max_selections",
@@ -84,7 +85,12 @@ def main():
 
     programmer = Programmer(client=client, llm=args.model)
 
-    evaluator = Evaluator(client=client, llm=args.model, solver_time_limit=600)
+    evaluator = Evaluator(
+        client=client,
+        llm=args.model,
+        solver_time_limit=600,
+        solver_threads=args.solver_threads,
+    )
     result_formatter = ResultFormatter(client=client, llm=args.model)
 
     manager = GroupChatManager(

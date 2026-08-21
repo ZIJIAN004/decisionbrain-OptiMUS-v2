@@ -10,6 +10,9 @@ from adapters.frontieror.sandbox import build_command
 
 def test_sandbox_exposes_only_current_case_inputs():
     assert config.TASK_MEM_GB == 100
+    assert config.solver_threads(1) == 32
+    assert config.solver_threads(4) == 8
+    assert config.solver_threads(5) == 6
     root = Path(tempfile.mkdtemp())
     repo = root / "repo"
     python_env = root / "python-env"

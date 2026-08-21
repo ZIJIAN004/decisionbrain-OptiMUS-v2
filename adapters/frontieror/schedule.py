@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import os
 import subprocess
 import sys
 import time
@@ -76,7 +77,13 @@ def _run_wrapper(
         }
 
 
-def process_case(paper_id: str, case: dict, mem_gb: int, log_dir: Path) -> dict:
+def process_case(
+    paper_id: str,
+    case: dict,
+    mem_gb: int,
+    solver_threads: int,
+    log_dir: Path,
+) -> dict:
     instance_path = config.instance_path(paper_id, case["instance_index"])
     task_dir = config.task_dir(paper_id)
     record: dict = {
@@ -116,6 +123,8 @@ def process_case(paper_id: str, case: dict, mem_gb: int, log_dir: Path) -> dict:
             "/input/solution_schema.json",
             "--instance_path",
             "/input/instance.json",
+            "--solver_threads",
+            str(solver_threads),
         ],
         mem_gb=mem_gb,
         timeout_s=config.TASK_TIMEOUT_SECONDS,
@@ -152,6 +161,9 @@ def main() -> int:
     args = parser.parse_args()
 
     mem_gb = config.TASK_MEM_GB
+    solver_threads = config.solver_threads(args.jobs)
+    for variable in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        os.environ[variable] = str(solver_threads)
 
     cases = config.load_cases()
     if args.only:
@@ -162,6 +174,7 @@ def main() -> int:
 
     print(
         f"{len(ordered)} cases | jobs={args.jobs} | {mem_gb} GB per task "
+        f"| {solver_threads} solver threads per task "
         f"| {config.TASK_TIMEOUT_SECONDS}s wall",
         flush=True,
     )
@@ -175,7 +188,9 @@ def main() -> int:
     with report_path.open("w", encoding="utf-8") as out:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
             futures = {
-                pool.submit(process_case, pid, case, mem_gb, log_dir): pid
+                pool.submit(
+                    process_case, pid, case, mem_gb, solver_threads, log_dir
+                ): pid
                 for pid, case in ordered
             }
             for future in concurrent.futures.as_completed(futures):

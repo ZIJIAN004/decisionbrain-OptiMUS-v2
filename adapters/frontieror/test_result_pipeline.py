@@ -87,13 +87,14 @@ def test_template_validation_rejects_missing_fields():
 def test_evaluator_defaults_to_600_seconds():
     evaluator = Evaluator(client=FakeClient([]))
     assert evaluator.solver_time_limit == 600
+    assert evaluator.solver_threads == 32
 
 
 def test_evaluator_captures_time_limit_incumbent():
     root = Path(tempfile.mkdtemp())
     data = root / "data.json"
     data.write_text("{}", encoding="utf-8")
-    evaluator = Evaluator(client=FakeClient([]))
+    evaluator = Evaluator(client=FakeClient([]), solver_threads=8)
     evaluator.get_solver_prep_code = lambda: (
         """
 class GRB:
@@ -105,8 +106,10 @@ class Variable:
     VarName='x[0]'; X=1.0
 class Model:
     status=9; SolCount=1; ObjVal=7.5
-    def setParam(self, name, value): self.time_limit = (name, value)
-    def optimize(self): assert self.time_limit == ('TimeLimit', 600)
+    params = {}
+    def setParam(self, name, value): self.params[name] = value
+    def optimize(self):
+        assert self.params == {'TimeLimit': 600, 'Threads': 8}
     def getVars(self): return [Variable()]
 model = Model()
 """

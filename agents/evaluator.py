@@ -48,7 +48,12 @@ elif status == gp.GRB.TIME_LIMIT and model.SolCount > 0:
 
 class Evaluator(Agent):
     def __init__(
-        self, client: openai.Client, solver="gurobipy", solver_time_limit=600, **kwargs
+        self,
+        client: openai.Client,
+        solver="gurobipy",
+        solver_time_limit=600,
+        solver_threads=32,
+        **kwargs,
     ):
         super().__init__(
             name="Evaluator",
@@ -58,6 +63,7 @@ class Evaluator(Agent):
         )
         self.solver = solver
         self.solver_time_limit = solver_time_limit
+        self.solver_threads = solver_threads
 
     def generate_reply(self, task: str, state: Dict, sender: Agent) -> (str, Dict):
         print("- Evaluator agent is called!")
@@ -161,6 +167,7 @@ class Evaluator(Agent):
             last_line = (
                 "\n# Optimize model with the evaluation-wide hard limit\n"
                 f"model.setParam('TimeLimit', {self.solver_time_limit})\n"
+                f"model.setParam('Threads', {self.solver_threads})\n"
                 "model.optimize()\n"
             )
             code += last_line + "\n"
