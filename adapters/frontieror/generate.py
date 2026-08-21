@@ -109,8 +109,10 @@ def build_input_targets(staging: Path) -> None:
         "constraints": targets["constraints"],
         "objective": targets["objective"],
         # OptiMUS only reads symbol/shape/definition; source_key and role are
-        # ours and are ignored downstream.
-        "parameters": params,
+        # ours and are ignored downstream. Entries marked role=metadata stay in
+        # parameters.json -- the record of what was judged non-modelling -- but
+        # are not part of what OptiMUS is asked to model.
+        "parameters": validate.modelling(params),
     }
     (staging / "input_targets.json").write_text(
         json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"

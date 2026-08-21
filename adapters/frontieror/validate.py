@@ -4,15 +4,19 @@ Two layers:
 
 1. OptiMUS's own ``prep_problem_json`` and ``sanity_check`` (utils/misc.py),
    loaded from source so the check that runs is the baseline's, not a copy.
-2. Four extra assertions that ``sanity_check`` does not cover -- it only
-   inspects parameter symbols and declared shapes, and says nothing about
-   whether the conversion was faithful to the instance.
+2. Five extra assertions. ``sanity_check`` is not the whole input contract:
+   half of what OptiMUS requires of a parameter list is enforced nowhere but
+   inside the agents, by string comparison (agents/formulator.py:373,
+   agents/programmer.py:557, agents/evaluator.py:105). A conversion can pass
+   ``sanity_check`` and still be unusable, so those rules are checked here too,
+   alongside the ones about faithfulness to the instance.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import keyword
 import sys
 import types
 from pathlib import Path
@@ -64,16 +68,148 @@ def _is_ragged(value: Any) -> bool:
     return any(_is_ragged(v) for v in value if isinstance(v, list))
 
 
-# --- the four assertions -----------------------------------------------------
+# --- roles -------------------------------------------------------------------
+
+def _is_metadata(param: dict) -> bool:
+    return param.get("role") == "metadata"
+
+
+def modelling(params: list[dict]) -> list[dict]:
+    """The parameters OptiMUS actually receives.
+
+    Keys declared role=metadata stay in parameters.json -- so the record shows
+    what was judged non-modelling, and key coverage still accounts for them --
+    but they are not handed to the modelling agents.
+    """
+    return [p for p in params if not _is_metadata(p)]
+
+
+# Names bound by the harness around the generated code: agents/evaluator.py
+# prep_code (:14-24), get_solver_prep_code (:180) and post_code (:27-42). A
+# parameter with one of these names would overwrite the model or the data.
+RESERVED_NAMES = frozenset({"json", "np", "math", "gp", "model", "data", "f", "status", "obj_val"})
+
+# Builtins the generated gurobipy code routinely calls. Shadowing one of these
+# with a parameter is silent until the line that calls it.
+SHADOWED_BUILTINS = frozenset(
+    {"sum", "min", "max", "range", "len", "abs", "round", "int", "float", "list", "dict", "set", "str"}
+)
+
+
+# --- the five assertions ------------------------------------------------------
+
+def _assert_symbol_contract(params: list[dict]) -> dict:
+    """The half of the input contract that sanity_check does not check.
+
+    utils/misc.py:205 tolerates one underscore in a symbol and utils/misc.py:222
+    is satisfied by a dimension that merely exists in data.json. Neither is
+    enough:
+
+    * agents/formulator.py:373-374 matches the text inside \\textup{} against
+      ``symbol`` by exact equality and raises on anything unmatched (:414), and
+      agents/programmer.py:557 selects a constraint's parameters the same way.
+      The formulator is instructed to write indices outside the symbol
+      (formulator.py:101), so a symbol carrying its own index suffix can never
+      match.
+    * agents/evaluator.py:105-110 executes the ``code`` line of each *parameter*
+      and nothing else, so a dimension that is not itself a parameter is simply
+      not a defined name in the namespace the generated code runs in.
+    """
+    malformed = [p for p in params if not isinstance(p.get("symbol"), str) or not p["symbol"]]
+    if malformed:
+        raise ValidationError(
+            f"{len(malformed)} entries in parameters.json have no usable `symbol`. "
+            "Every entry needs a symbol, a shape and a definition."
+        )
+
+    real = modelling(params)
+    declared = {p["symbol"] for p in real}
+    scalars = {p["symbol"] for p in real if not p.get("shape")}
+
+    suffixed = sorted(p["symbol"] for p in real if "_" in p["symbol"])
+    if suffixed:
+        raise ValidationError(
+            f"These symbols carry an index suffix: {suffixed}. A symbol must be "
+            "bare -- write `linearCost`, not `linearCost_ij`. OptiMUS matches the "
+            "name inside \\textup{...} against the symbol by exact string "
+            "equality, so a suffixed symbol can never be resolved. Move the "
+            "indices into `shape`, and rename the matching data.json keys so each "
+            "symbol is still spelled exactly like its key."
+        )
+
+    forbidden = RESERVED_NAMES | SHADOWED_BUILTINS
+    unusable = sorted(
+        p["symbol"] for p in real
+        if not p["symbol"].isidentifier()
+        or keyword.iskeyword(p["symbol"])
+        or p["symbol"] in forbidden
+    )
+    if unusable:
+        raise ValidationError(
+            f"These symbols cannot be used as Python names: {unusable}. A symbol "
+            "must be a valid identifier, must not be a Python keyword, and must "
+            f"not be one of {sorted(forbidden)} -- names the generated code "
+            "already binds or calls. Rename the symbol and its data.json key "
+            "together so the two still match."
+        )
+
+    undeclared = sorted(
+        {d for p in real for d in p.get("shape", [])} - declared
+    )
+    if undeclared:
+        raise ValidationError(
+            f"These dimension names are used in a shape but are not parameters: "
+            f"{undeclared}. Being present in data.json is not enough -- only "
+            "parameters are loaded into the namespace the generated code runs in, "
+            "so indexing with one of these raises NameError. Add each as its own "
+            'entry with shape [] and the same name, and keep its integer value in '
+            "data.json."
+        )
+
+    non_scalar_dims = sorted(
+        {d for p in real for d in p.get("shape", [])} & declared - scalars
+    )
+    if non_scalar_dims:
+        raise ValidationError(
+            f"These names are used as dimensions but are declared with a non-empty "
+            f"shape: {non_scalar_dims}. A dimension must be a scalar integer "
+            "parameter (shape [])."
+        )
+
+    bad_metadata = sorted(
+        p["symbol"] for p in params if _is_metadata(p) and p.get("shape")
+    )
+    if bad_metadata:
+        raise ValidationError(
+            f"These parameters are role=metadata but declare a shape: "
+            f"{bad_metadata}. Metadata carries no modelling content, so it has "
+            "shape [] and no entry in data.json."
+        )
+
+    return {
+        "modelling": len(real),
+        "metadata": len(params) - len(real),
+        "dimensions": len({d for p in real for d in p.get("shape", [])}),
+    }
+
 
 def _assert_no_scalarization(params: list[dict], instance: dict) -> dict:
     """A key that carries structure must keep it. shape == [] is legal in
     sanity_check (utils/misc.py:220 skips the dimension check entirely when the
-    shape is empty), which is exactly the degenerate encoding we refuse."""
+    shape is empty), which is exactly the degenerate encoding we refuse.
+
+    Dimension parameters are exempt. A padded array's width is a genuine scalar
+    even though the key it comes from is a list, so flagging it would make the
+    padding rule and this rule contradict each other.
+    """
+    real = modelling(params)
+    dimension_names = {d for p in real for d in p.get("shape", [])}
     offenders = []
-    for param in params:
+    for param in real:
         key = param.get("source_key")
         if key is None or param.get("role") == "mask":
+            continue
+        if param["symbol"] in dimension_names:
             continue
         if not _is_scalar(instance.get(key)) and not param.get("shape"):
             offenders.append(param["symbol"])
@@ -83,7 +219,7 @@ def _assert_no_scalarization(params: list[dict], instance: dict) -> dict:
             f"with shape []: {offenders}. Give each one its real dimensions, and "
             "declare every dimension name as its own integer entry in data.json."
         )
-    return {"checked": len(params), "offenders": 0}
+    return {"checked": len(real), "offenders": 0}
 
 
 def _assert_key_coverage(params: list[dict], instance: dict) -> dict:
@@ -111,8 +247,9 @@ def _assert_ragged_has_mask(params: list[dict], instance: dict) -> dict:
     model should do about them; padding with a semantically neutral value (+inf,
     -1) would make that decision for OptiMUS."""
     masked = {p.get("source_key") for p in params if p.get("role") == "mask"}
+    as_metadata = {p.get("source_key") for p in params if _is_metadata(p)}
     ragged = {k for k, v in instance.items() if _is_ragged(v)}
-    unmasked = sorted(ragged - masked)
+    unmasked = sorted(ragged - masked - as_metadata)
     if unmasked:
         raise ValidationError(
             "These keys are ragged in the instance and were padded without a "
@@ -160,8 +297,15 @@ def validate(task_staging: Path, instance: dict, run_transform) -> tuple[dict, d
     params = json.loads(params_path.read_text(encoding="utf-8"))
     if not isinstance(params, list) or not params:
         raise ValidationError("parameters.json must be a non-empty list.")
+    if not modelling(params):
+        raise ValidationError(
+            "Every parameter is marked role=metadata, so OptiMUS would receive "
+            "nothing to model. Metadata is for values that cannot enter any "
+            "formulation, not for the instance as a whole."
+        )
 
     report = {
+        "symbol_contract": _assert_symbol_contract(params),
         "no_scalarization": _assert_no_scalarization(params, instance),
         "key_coverage": _assert_key_coverage(params, instance),
         "ragged_has_mask": _assert_ragged_has_mask(params, instance),
@@ -170,7 +314,9 @@ def validate(task_staging: Path, instance: dict, run_transform) -> tuple[dict, d
     # OptiMUS's own checks. prep_problem_json fills in the `code` field that
     # sanity_check then requires, so the order matters.
     state = {
-        "parameters": [dict(p) for p in params],
+        # Metadata never reaches OptiMUS, so it is not what sanity_check should
+        # be given either -- input_targets.json carries the modelling half only.
+        "parameters": [dict(p) for p in modelling(params)],
         "data_json_path": str(task_staging / "data.json"),
     }
     try:
@@ -185,11 +331,13 @@ def validate(task_staging: Path, instance: dict, run_transform) -> tuple[dict, d
 
     report["determinism"] = _assert_determinism(task_staging, run_transform)
 
-    shaped = sum(1 for p in params if p.get("shape"))
+    real = modelling(params)
+    shaped = sum(1 for p in real if p.get("shape"))
     coverage = {
-        "parameters": len(params),
+        "parameters": len(real),
         "shaped": shaped,
-        "scalar": len(params) - shaped,
-        "mask_parameters": sum(1 for p in params if p.get("role") == "mask"),
+        "scalar": len(real) - shaped,
+        "mask_parameters": sum(1 for p in real if p.get("role") == "mask"),
+        "metadata_parameters": len(params) - len(real),
     }
     return report, coverage

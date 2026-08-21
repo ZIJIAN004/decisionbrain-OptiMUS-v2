@@ -55,13 +55,15 @@ It reads the instance, restructures it, and writes data.json. Requirements:
   read the clock or a random seed. The same instance must produce a
   byte-identical data.json every run -- this is checked by running it twice.
 - Lossless. Every top-level key of the instance must survive into data.json in
-  some form. You may rename, flatten a dict of records into arrays, or split one
+  some form, unless you declare it role=metadata in parameters.json. You may rename, flatten a dict of records into arrays, or split one
   key into several. You may NOT drop a key you judge irrelevant, merge two keys,
   or pre-aggregate values. Deciding what matters is the modelling step, and that
   belongs to the solver team, not to you.
-- Every dimension you name must exist in data.json as its own integer entry. If
-  you declare a parameter with shape ["n", "m"], then data["n"] and data["m"]
-  must be integers equal to the actual array dimensions.
+- Every dimension you name must exist in data.json as its own integer entry,
+  and must also be declared as a parameter. If you declare a parameter with
+  shape ["numRows", "numCols"], then data["numRows"] and data["numCols"] must
+  be integers equal to the actual array dimensions, and both names must appear
+  in parameters.json with shape [].
 - Ragged arrays must be padded to a rectangle with 0, and each padded key must
   also produce a mask array of the same shape: 1 where the cell is real, 0 where
   it is padding. Pad with 0 and nothing else. Do not pad with a value chosen to
@@ -73,19 +75,28 @@ It reads the instance, restructures it, and writes data.json. Requirements:
 PARAMETERS_RULES = """`parameters.json` is a JSON list. One entry per quantity:
 
     {
-      "symbol":      "linearCosts",
-      "shape":       ["n", "m"],
-      "definition":  "unit shipping cost from supplier i to customer j",
+      "symbol":      "linearCost",
+      "shape":       ["numSuppliers", "numCustomers"],
+      "definition":  "unit shipping cost from supplier i to customer j, indexed by supplier then customer",
       "source_key":  "linear_costs"
     }
 
-- `symbol` must be camelCase and contain at most one underscore. Its part before
-  the underscore must be a top-level key of data.json, spelled identically. This
-  is how the generated code reaches the data, so `flowCost_ij` reads
-  data["flowCost"].
+- `symbol` must be camelCase and must contain NO underscore and NO index letters.
+  Write `linearCost`, never `linearCost_ij` and never `linear_cost`. The indices
+  live in `shape` and nowhere else. This is not a style preference: the modelling
+  agents write the symbol back as \\textup{linearCost}_{i,j} and OptiMUS matches
+  the part inside \\textup{} against your `symbol` by exact string equality, so
+  any suffix makes the symbol unresolvable and the run dies.
+- `symbol` must be spelled identically to a top-level key of data.json, because
+  the generated code reaches the data as data["linearCost"].
 - `shape` lists dimension names, or [] for a genuine scalar. A value that is a
   list or a dict in the instance is NOT a scalar and must carry its real
   dimensions. Encoding structure away as [] is rejected.
+- EVERY name you use in a `shape` must itself appear in this list as its own
+  entry with shape [] -- an integer parameter holding that dimension. Only
+  parameters are loaded into the namespace the generated code runs in, so a
+  dimension that is merely present in data.json but not declared here is not a
+  defined name and the code that indexes with it raises NameError.
 - `definition` is the only thing the modelling agents ever see about this
   quantity -- they never see a single number. Say what it means and how it is
   laid out, in one sentence. "cost matrix" is not enough; "unit shipping cost
@@ -93,7 +104,15 @@ PARAMETERS_RULES = """`parameters.json` is a JSON list. One entry per quantity:
 - `source_key` is the top-level key of the original instance this came from.
   Every top-level key must appear as some entry's `source_key`.
 - A mask array adds `"role": "mask"` and keeps the `source_key` of the array it
-  masks."""
+  masks. Masks are ordinary parameters otherwise: bare symbol, real shape, and
+  their dimensions declared like any other.
+- A key that carries no modelling content -- a free-text description, an
+  instance id, a provenance record -- gets `"role": "metadata"`, shape [], and no
+  entry in data.json. It stays in this list so nothing is silently dropped and so
+  the record shows what you judged non-modelling, but it is not handed to the
+  modelling agents. Use this only for values that cannot enter any formulation;
+  never for a number, and never for something merely inconvenient to encode. Do
+  NOT encode a string as an array of character codes."""
 
 
 TARGETS_RULES = """`targets.json` describes the model in words:
@@ -112,7 +131,11 @@ Follow these rules exactly:
    X is at most Y", "Each X has a size of at least Y").
 7. Keep each constraint separate and explicit. Do not merge different
    constraints into a single entry.
-8. Refer to quantities by the `symbol` you gave them in parameters.json.
+8. Refer to quantities by exactly the `symbol` you gave them in
+   parameters.json -- bare, with no index suffix. Write `linearCost`, not
+   `linearCost_ij`. Do the same in `background`.
+9. Do not refer to anything you marked role=metadata; the modelling agents
+   never see it.
 
 Do not invent a constraint that the problem statement does not state, and do not
 leave one out because it looks hard to model."""
