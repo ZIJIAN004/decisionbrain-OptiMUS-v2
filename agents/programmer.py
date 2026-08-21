@@ -35,6 +35,10 @@ buy = model.addVars(I, M, vtype=gp.GRB.CONTINUOUS, name="buy")
 - Note that the indices in symbol (what comes after _) are not a part of the variable name in code.
 - Use model.addVar instead of model.addVars if the variable is a scalar.
 
+Every evaluated Gurobi solve has a hard 600-second time limit. Write ordinary
+Gurobi model code; the Evaluator will apply TimeLimit=600 and preserve the best
+incumbent when Gurobi returns TIME_LIMIT. Do not assume unlimited optimization.
+
 """,
 ]
 
@@ -55,6 +59,9 @@ Here's a constraint we need you to write the code for, along with the list of re
 - If the constraint requires changing a variable's integralilty, generate the code for changing the variable's integrality rather than defining the variable again.
 - If there is no code needed, just generate the comment line (using # ) enclosed in ===== lines explaining why.
 - Variables should become before parameters when defining inequality constraints in gurobipy (because of the gurobi parsing order syntax)
+
+The evaluated solve is limited to 600 seconds; the system captures the best
+incumbent returned at TIME_LIMIT.
 
 Here's an example:
 
@@ -259,6 +266,9 @@ otherwise, fix the last part code and generate a json file with the following fo
 - Note that the fixed code should be the fixed version of the last part code, not the whole code snippet. Only fix the part that is for modeling the {target}.
 - Do not generate any text after the json file. 
 - Variables should become before parameters when defining inequality constraints in gurobipy (because of the gurobi parsing order syntax)
+
+The evaluated solve is limited to 600 seconds; the system captures the best
+incumbent returned at TIME_LIMIT.
 
 Take a deep breath and solve the problem step by step.
 
