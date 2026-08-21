@@ -177,11 +177,9 @@ def propose(
     )
 
 
-def generate(paper_id: str, case: dict) -> dict:
+def generate(paper_id: str, case: dict, mem_gb: int) -> dict:
     instance_path = config.instance_path(paper_id, case["instance_index"])
     problem_md = config.problem_md_path(paper_id).read_text(encoding="utf-8")
-    mem_gb = config.TASK_MEM_GB
-
     # Parsed once and reused by every assertion; the largest case measured
     # 9.7 GB resident, well inside the per-task cap.
     with instance_path.open(encoding="utf-8") as handle:

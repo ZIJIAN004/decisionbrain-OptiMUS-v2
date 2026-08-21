@@ -101,7 +101,7 @@ def process_case(
         from .generate import generate  # imported late: only this path needs an LLM
 
         try:
-            record["conversion"] = generate(paper_id, case)
+            record["conversion"] = generate(paper_id, case, mem_gb)
         except Exception as exc:  # noqa: BLE001
             record["outcome"] = "adapter_failed"
             record["error"] = f"{type(exc).__name__}: {exc}"
@@ -165,7 +165,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    mem_gb = config.TASK_MEM_GB
+    mem_gb = config.task_memory_gb(args.jobs)
     solver_threads = config.solver_threads(args.jobs)
     cpu_cores = config.process_cpu_cores(args.jobs)
     for variable in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):

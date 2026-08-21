@@ -9,7 +9,10 @@ from adapters.frontieror.sandbox import build_command, build_scope_command
 
 
 def test_sandbox_exposes_only_current_case_inputs():
-    assert config.TASK_MEM_GB == 100
+    assert config.TOTAL_MEM_GB == 100
+    assert config.task_memory_gb(1) == 100
+    assert config.task_memory_gb(4) == 25
+    assert config.task_memory_gb(6) == 16
     assert config.solver_threads(1) == 32
     assert config.solver_threads(4) == 8
     assert config.solver_threads(5) == 6

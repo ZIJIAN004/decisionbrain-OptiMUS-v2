@@ -51,9 +51,7 @@ PROBLEM_ROOT = Path(
 )
 
 # --- resource budget ---------------------------------------------------------
-# Every evaluated process receives the same cgroup limit. Concurrency is an
-# independent scheduling decision and must account for aggregate host capacity.
-TASK_MEM_GB = 100
+TOTAL_MEM_GB = 100
 LOGICAL_CPUS = 32
 PHYSICAL_CORES = 24
 JOBS = int(os.environ.get("ADAPTER_JOBS", "1"))
@@ -71,10 +69,18 @@ def solver_threads(jobs: int) -> int:
     return max(1, LOGICAL_CPUS // jobs)
 
 
+def task_memory_gb(jobs: int) -> int:
+    if jobs < 1:
+        raise ValueError("jobs must be at least 1")
+    return max(1, TOTAL_MEM_GB // jobs)
+
+
 def process_cpu_cores(jobs: int) -> int:
     if jobs < 1:
         raise ValueError("jobs must be at least 1")
-    return max(1, PHYSICAL_CORES // jobs)
+    if jobs > PHYSICAL_CORES:
+        raise ValueError(f"jobs cannot exceed {PHYSICAL_CORES} physical cores")
+    return PHYSICAL_CORES // jobs
 
 
 # Matches DecisionBrain's --task-timeout-seconds 7200. No inner solver limit is
