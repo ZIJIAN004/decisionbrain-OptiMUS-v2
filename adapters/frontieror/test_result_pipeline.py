@@ -21,7 +21,7 @@ class FakeClient:
         return type("Completion", (), {"choices": [choice]})()
 
 
-def test_formatter_retries_tool_failure_and_writes_solution():
+def test_formatter_writes_solution_in_one_attempt():
     root = Path(tempfile.mkdtemp())
     raw = root / "raw.json"
     data = root / "data.json"
@@ -44,8 +44,6 @@ def test_formatter_retries_tool_failure_and_writes_solution():
     problem.write_text("Select items.", encoding="utf-8")
     client = FakeClient(
         [
-            "=====\ndef build_solution(raw_solution, data, instance):\n"
-            "    raise ValueError('bad mapping')\n=====",
             (
                 "=====\ndef build_solution(raw_solution, data, instance):\n"
                 "    return {'objective_value': raw_solution['objective_value'], "
@@ -53,7 +51,8 @@ def test_formatter_retries_tool_failure_and_writes_solution():
             ),
         ]
     )
-    formatter = ResultFormatter(client=client, llm="fake", max_attempts=2)
+    formatter = ResultFormatter(client=client, llm="fake")
+    assert formatter.max_attempts == 1
     state = {
         "raw_solution_path": str(raw),
         "target_solution_schema_path": str(schema),
@@ -68,7 +67,7 @@ def test_formatter_retries_tool_failure_and_writes_solution():
     _, result = formatter.generate_reply("format", state, sender=None)
 
     assert result["solution_export_status"] == "completed"
-    assert result["solution_export_attempts"] == 2
+    assert result["solution_export_attempts"] == 1
     assert json.loads((root / "solution.json").read_text()) == {
         "objective_value": 4.0,
         "selected": [0],
@@ -132,7 +131,7 @@ model = Model()
 
 
 if __name__ == "__main__":
-    test_formatter_retries_tool_failure_and_writes_solution()
+    test_formatter_writes_solution_in_one_attempt()
     test_template_validation_rejects_missing_fields()
     test_evaluator_defaults_to_600_seconds()
     test_evaluator_captures_time_limit_incumbent()

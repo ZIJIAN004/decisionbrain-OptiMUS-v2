@@ -46,7 +46,7 @@ Available incumbent variable families and samples:
 
 
 class ResultFormatter(Agent):
-    def __init__(self, client: openai.Client, max_attempts=3, **kwargs):
+    def __init__(self, client: openai.Client, **kwargs):
         super().__init__(
             name="ResultFormatter",
             description=(
@@ -56,7 +56,7 @@ class ResultFormatter(Agent):
             client=client,
             **kwargs,
         )
-        self.max_attempts = max_attempts
+        self.max_attempts = 1
 
     def generate_reply(self, task: str, state: dict, sender: Agent) -> tuple[str, dict]:
         raw_path = state.get("raw_solution_path")
