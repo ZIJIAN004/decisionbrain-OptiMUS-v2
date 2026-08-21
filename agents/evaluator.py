@@ -2,6 +2,8 @@ from typing import Dict
 from agents.agent import Agent
 import json
 import openai
+import os
+import tempfile
 import traceback
 
 main_prompt_templates = [
@@ -18,7 +20,7 @@ import math
 
 {solver_prep_code}
 
-with open("{data_json_path}", "r") as f:
+with open({data_json_path!r}, "r") as f:
     data = json.load(f)
 
 """
@@ -39,11 +41,15 @@ elif status == gp.GRB.UNBOUNDED:
     obj_val = "unbounded"
 elif status == gp.GRB.OPTIMAL:
     obj_val = model.objVal
+elif status == gp.GRB.TIME_LIMIT and model.SolCount > 0:
+    obj_val = model.ObjVal
 """
 
 
 class Evaluator(Agent):
-    def __init__(self, client: openai.Client, solver="gurobipy", **kwargs):
+    def __init__(
+        self, client: openai.Client, solver="gurobipy", solver_time_limit=600, **kwargs
+    ):
         super().__init__(
             name="Evaluator",
             description="This is an evaluator agent that is an expert in running optimization codes, identifying the bugs and errors, ane evaluating the performance and correctness of the code.",
@@ -51,6 +57,7 @@ class Evaluator(Agent):
             **kwargs,
         )
         self.solver = solver
+        self.solver_time_limit = solver_time_limit
 
     def generate_reply(self, task: str, state: Dict, sender: Agent) -> (str, Dict):
         print("- Evaluator agent is called!")
@@ -77,11 +84,31 @@ class Evaluator(Agent):
             )
 
         else:
-            state["solution_status"] = "solved"
+            has_candidate = res["solution_count"] > 0
+            state["solution_status"] = (
+                "solved"
+                if res["status_name"] == "optimal"
+                else "candidate"
+                if has_candidate
+                else "no_solution"
+            )
             state["solver_output_status"] = res["status"]
+            state["solver_output_status_name"] = res["status_name"]
             state["obj_val"] = res["obj_val"]
             state["code"] = res["code"]
-            return ("Evaluation Done! The problem is solved.", state)
+            state["solution_count"] = res["solution_count"]
+            if res["raw_solution_path"] is not None:
+                state["raw_solution_path"] = res["raw_solution_path"]
+                state["solution_export_status"] = "pending"
+                return (
+                    f"Evaluation done with {res['status_name']}; a candidate solution was saved. "
+                    "The fixed post-processing stage will format it after this workflow finishes.",
+                    state,
+                )
+            return (
+                f"Evaluation done with {res['status_name']}; no candidate solution is available.",
+                state,
+            )
 
     def _run_code(self, state: Dict):
         local_env = {}
@@ -131,9 +158,36 @@ class Evaluator(Agent):
             exec(last_line, local_env, local_env)
 
             bogus_context = "OPTIMIZATION CALL"
-            last_line = f"\n# Optimize model\nmodel.optimize()\n"
+            last_line = (
+                "\n# Optimize model with the evaluation-wide hard limit\n"
+                f"model.setParam('TimeLimit', {self.solver_time_limit})\n"
+                "model.optimize()\n"
+            )
             code += last_line + "\n"
             exec(last_line, local_env, local_env)
+
+            model = local_env["model"]
+            solution_count = int(model.SolCount)
+            status_name = self._status_name(model.status, local_env["gp"])
+            raw_solution_path = None
+            if solution_count > 0:
+                local_env["obj_val"] = float(model.ObjVal)
+                raw_solution_path = os.path.join(
+                    state["log_folder"], "raw_solution.json"
+                )
+                self._atomic_write_json(
+                    raw_solution_path,
+                    {
+                        "solver_status": status_name,
+                        "solver_status_code": int(model.status),
+                        "solution_count": solution_count,
+                        "objective_value": float(model.ObjVal),
+                        "variables": {
+                            variable.VarName: float(variable.X)
+                            for variable in model.getVars()
+                        },
+                    },
+                )
 
             bogus_context = None
             last_line = post_code
@@ -146,6 +200,9 @@ class Evaluator(Agent):
                 "code": code,
                 "obj_val": local_env["obj_val"],
                 "status": local_env["status"],
+                "status_name": status_name,
+                "solution_count": solution_count,
+                "raw_solution_path": raw_solution_path,
                 "error_message": None,
             }
 
@@ -171,6 +228,9 @@ class Evaluator(Agent):
                 "code": code,
                 "obj_val": None,
                 "status": None,
+                "status_name": "runtime_error",
+                "solution_count": 0,
+                "raw_solution_path": None,
                 "error_message": error_msg,
                 "bogus_context": bogus_context,
             }
@@ -180,3 +240,36 @@ class Evaluator(Agent):
             return "import gurobipy as gp\n\n # Define model\nmodel = gp.Model('model')"
         else:
             raise Exception(f"Solver {self.solver} is not supported yet!")
+
+    @staticmethod
+    def _status_name(status, gp):
+        names = {
+            gp.GRB.OPTIMAL: "optimal",
+            gp.GRB.TIME_LIMIT: "time_limit",
+            gp.GRB.INFEASIBLE: "infeasible",
+            gp.GRB.INF_OR_UNBD: "infeasible_or_unbounded",
+            gp.GRB.UNBOUNDED: "unbounded",
+            gp.GRB.INTERRUPTED: "interrupted",
+            gp.GRB.SUBOPTIMAL: "suboptimal",
+        }
+        return names.get(status, f"status_{status}")
+
+    @staticmethod
+    def _atomic_write_json(path, payload):
+        directory = os.path.dirname(path)
+        os.makedirs(directory, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(
+            prefix=".raw-solution-", suffix=".json", dir=directory
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        except Exception:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise

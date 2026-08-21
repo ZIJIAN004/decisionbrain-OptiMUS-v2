@@ -11,6 +11,7 @@ from agents.user_proxy import UserProxy
 from agents.formulator import Formulator
 from agents.programmer import Programmer
 from agents.evaluator import Evaluator
+from agents.result_formatter import ResultFormatter
 
 
 def main():
@@ -29,6 +30,15 @@ def main():
         help="Base large language model",
     )
     parser.add_argument("--log_dir", type=str, help="Log directory")
+    parser.add_argument(
+        "--problem_path", type=str, help="Natural-language problem file"
+    )
+    parser.add_argument(
+        "--solution_schema", type=str, help="Target solution template JSON"
+    )
+    parser.add_argument(
+        "--instance_path", type=str, help="Original structured instance"
+    )
 
     parser.add_argument(
         "--max_selections",
@@ -74,7 +84,8 @@ def main():
 
     programmer = Programmer(client=client, llm=args.model)
 
-    evaluator = Evaluator(client=client, llm=args.model)
+    evaluator = Evaluator(client=client, llm=args.model, solver_time_limit=600)
+    result_formatter = ResultFormatter(client=client, llm=args.model)
 
     manager = GroupChatManager(
         client=client,
@@ -117,14 +128,24 @@ def main():
         "obj_val": None,
         "log_folder": log_dir,
         "data_json_path": f"data/{dataset}/{problem}/data.json",
+        "problem_path": args.problem_path,
+        "target_solution_schema_path": args.solution_schema,
+        "instance_path": args.instance_path,
     }
     if not os.path.exists(state["log_folder"]):
         os.makedirs(state["log_folder"])
 
     sanity_check(state)
     try:
-        final_state = manager.solve(state=state)
-        with open(f"data/{dataset}/{problem}/output.json", "w") as f:
+        _, final_state = manager.solve(state=state)
+        if final_state.get("raw_solution_path") and args.solution_schema:
+            message, final_state = result_formatter.generate_reply(
+                task="Convert the saved incumbent to the required target solution format.",
+                state=final_state,
+                sender=manager,
+            )
+            print(message)
+        with open(os.path.join(state["log_folder"], "output.json"), "w") as f:
             json.dump(final_state, f, indent=4)
 
     except Exception as e:

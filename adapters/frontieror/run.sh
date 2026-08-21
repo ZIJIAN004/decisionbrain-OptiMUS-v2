@@ -16,7 +16,6 @@ RUNS_ROOT="${RUNS_ROOT:-/home/bhz/baselines/optimus-runs}"
 ENV_FILE="${ENV_FILE:-/home/bhz/Decision Brain/.env}"
 PYTHON="${PYTHON:-/home/bhz/miniforge3/envs/decisionbrain_baseline/bin/python}"
 JOBS="${JOBS:-1}"
-BUDGET_GB="${BUDGET_GB:-100}"
 
 for path in "$REPO" "$ENV_FILE" "$PYTHON"; do
     [ -e "$path" ] || { echo "missing: $path" >&2; exit 1; }
@@ -28,7 +27,7 @@ mkdir -p "$RUN_DIR"
 
 cd "$REPO"
 set -a; . "$ENV_FILE"; set +a
-export ADAPTER_JOBS="$JOBS" ADAPTER_TOTAL_BUDGET_GB="$BUDGET_GB"
+export ADAPTER_JOBS="$JOBS"
 
 # What produced these numbers, written next to them. A report without the commit
 # and the model that made it cannot be compared against anything later.
@@ -38,7 +37,7 @@ export ADAPTER_JOBS="$JOBS" ADAPTER_TOTAL_BUDGET_GB="$BUDGET_GB"
     echo "host       $(hostname)"
     echo "python     $PYTHON"
     echo "jobs       $JOBS"
-    echo "budget_gb  $BUDGET_GB"
+    echo "memory_gb  100 per task"
     echo "solver_llm ${LLM_CHAT_MODEL:-unset}"
     echo "converter  ${ADAPTER_CONVERTER_MODEL:-deepseek-v4-flash}"
     echo "args       $*"
@@ -46,7 +45,7 @@ export ADAPTER_JOBS="$JOBS" ADAPTER_TOTAL_BUDGET_GB="$BUDGET_GB"
 
 # -u so console.log is readable while the run is still going.
 nohup "$PYTHON" -u -m adapters.frontieror.schedule \
-    --jobs "$JOBS" --budget-gb "$BUDGET_GB" \
+    --jobs "$JOBS" \
     --run-dir "$RUN_DIR" \
     "$@" \
     > "$RUN_DIR/console.log" 2>&1 &

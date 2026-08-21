@@ -47,22 +47,40 @@ def explore(snippet: str, instance_path: Path, mem_gb: int) -> str:
     """
     driver = (
         "import json, sys\n"
-        f"data = json.load(open({str(instance_path)!r}, encoding='utf-8'))\n"
-        + snippet
+        f"data = json.load(open({str(instance_path)!r}, encoding='utf-8'))\n" + snippet
     )
-    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as handle:
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".py", delete=False, encoding="utf-8"
+    ) as handle:
         handle.write(driver)
         script = Path(handle.name)
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "adapters.frontieror.wrapper",
-             "--mem-gb", str(mem_gb), "--timeout", str(EXPLORE_TIMEOUT_S),
-             "--cwd", str(config.REPO_ROOT), "--log", str(script.with_suffix(".log")),
-             "--", sys.executable, str(script)],
-            cwd=str(config.REPO_ROOT), capture_output=True, text=True, check=False,
+            [
+                sys.executable,
+                "-m",
+                "adapters.frontieror.wrapper",
+                "--mem-gb",
+                str(mem_gb),
+                "--timeout",
+                str(EXPLORE_TIMEOUT_S),
+                "--cwd",
+                str(config.REPO_ROOT),
+                "--log",
+                str(script.with_suffix(".log")),
+                "--",
+                sys.executable,
+                str(script),
+            ],
+            cwd=str(config.REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
         )
         log = script.with_suffix(".log")
-        output = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
+        output = (
+            log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
+        )
         record = json.loads(proc.stdout.strip().splitlines()[-1])
         if record["outcome"] != "completed":
             output += f"\n[interrupted: {record['outcome']}]"
@@ -75,17 +93,37 @@ def explore(snippet: str, instance_path: Path, mem_gb: int) -> str:
 def run_transform(staging: Path, instance_path: Path, mem_gb: int) -> None:
     """Execute the converter's transform.py to produce data.json."""
     proc = subprocess.run(
-        [sys.executable, "-m", "adapters.frontieror.wrapper",
-         "--mem-gb", str(mem_gb), "--timeout", str(TRANSFORM_TIMEOUT_S),
-         "--cwd", str(staging), "--log", str(staging / "transform.log"),
-         "--", sys.executable, str(staging / "transform.py"),
-         "--instance", str(instance_path), "--out", str(staging / "data.json")],
-        cwd=str(config.REPO_ROOT), capture_output=True, text=True, check=False,
+        [
+            sys.executable,
+            "-m",
+            "adapters.frontieror.wrapper",
+            "--mem-gb",
+            str(mem_gb),
+            "--timeout",
+            str(TRANSFORM_TIMEOUT_S),
+            "--cwd",
+            str(staging),
+            "--log",
+            str(staging / "transform.log"),
+            "--",
+            sys.executable,
+            str(staging / "transform.py"),
+            "--instance",
+            str(instance_path),
+            "--out",
+            str(staging / "data.json"),
+        ],
+        cwd=str(config.REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
     )
     try:
         record = json.loads(proc.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
-        raise ValidationError(f"Could not run transform.py: {proc.stderr[-2000:]}") from None
+        raise ValidationError(
+            f"Could not run transform.py: {proc.stderr[-2000:]}"
+        ) from None
     if record["outcome"] != "completed":
         log = (staging / "transform.log").read_text(encoding="utf-8", errors="replace")
         raise ValidationError(
@@ -119,7 +157,9 @@ def build_input_targets(staging: Path) -> None:
     )
 
 
-def propose(problem_md: str, instance_path: Path, feedback: list[str], mem_gb: int) -> dict:
+def propose(
+    problem_md: str, instance_path: Path, feedback: list[str], mem_gb: int
+) -> dict:
     """Ask the fixed converter model for transform.py / parameters.json / targets.json.
 
     The converter inspects the instance through `explore` -- code it writes, run
@@ -136,7 +176,7 @@ def propose(problem_md: str, instance_path: Path, feedback: list[str], mem_gb: i
 def generate(paper_id: str, case: dict) -> dict:
     instance_path = config.instance_path(paper_id, case["instance_index"])
     problem_md = config.problem_md_path(paper_id).read_text(encoding="utf-8")
-    mem_gb = max(1, config.TOTAL_BUDGET_GB // config.JOBS)
+    mem_gb = config.TASK_MEM_GB
 
     # Parsed once and reused by every assertion; the largest case measured
     # 9.7 GB resident, well inside the per-task cap.
@@ -148,7 +188,9 @@ def generate(paper_id: str, case: dict) -> dict:
     staging_root.mkdir(parents=True, exist_ok=True)
 
     for attempt in range(1, config.MAX_GENERATION_ROUNDS + 1):
-        staging = Path(tempfile.mkdtemp(dir=staging_root, prefix=f".staging-{paper_id}-"))
+        staging = Path(
+            tempfile.mkdtemp(dir=staging_root, prefix=f".staging-{paper_id}-")
+        )
         try:
             answer = propose(problem_md, instance_path, feedback, mem_gb)
             for name, text in answer.items():

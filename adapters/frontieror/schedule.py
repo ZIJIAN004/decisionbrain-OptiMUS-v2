@@ -21,16 +21,48 @@ from pathlib import Path
 from . import config, manifest
 
 
-def _run_wrapper(command: list[str], mem_gb: int, timeout_s: int, log_path: Path) -> dict:
+def _run_wrapper(
+    command: list[str],
+    mem_gb: int,
+    timeout_s: int,
+    log_path: Path,
+    sandbox: dict | None = None,
+) -> dict:
     """Spawn wrapper.py so this task's resource usage is measured on its own."""
     argv = [
-        sys.executable, "-m", "adapters.frontieror.wrapper",
-        "--mem-gb", str(mem_gb),
-        "--timeout", str(timeout_s),
-        "--cwd", str(config.REPO_ROOT),
-        "--log", str(log_path),
-        "--", *command,
+        sys.executable,
+        "-m",
+        "adapters.frontieror.wrapper",
+        "--mem-gb",
+        str(mem_gb),
+        "--timeout",
+        str(timeout_s),
+        "--cwd",
+        str(config.REPO_ROOT),
+        "--log",
+        str(log_path),
     ]
+    if sandbox is not None:
+        argv.extend(
+            [
+                "--sandbox",
+                "--sandbox-python-env",
+                str(sandbox["python_env"]),
+                "--sandbox-output",
+                str(sandbox["output_dir"]),
+                "--sandbox-task-data",
+                str(sandbox["task_data"]),
+                "--sandbox-problem",
+                str(sandbox["problem"]),
+                "--sandbox-solution-schema",
+                str(sandbox["solution_schema"]),
+                "--sandbox-instance",
+                str(sandbox["instance"]),
+                "--sandbox-gurobi-home",
+                str(sandbox["gurobi_home"]),
+            ]
+        )
+    argv.extend(["--", *command])
     proc = subprocess.run(
         argv, cwd=str(config.REPO_ROOT), capture_output=True, text=True, check=False
     )
@@ -66,27 +98,60 @@ def process_case(paper_id: str, case: dict, mem_gb: int, log_dir: Path) -> dict:
     else:
         record["conversion"] = "cached"
 
+    artifact_dir = log_dir / f"{paper_id}-artifacts"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
     result = _run_wrapper(
-        ["python", "run.py", "--dataset", "frontieror", "--problem", paper_id],
+        [
+            "python",
+            "run.py",
+            "--dataset",
+            "frontieror",
+            "--problem",
+            paper_id,
+            "--log_dir",
+            str(artifact_dir),
+            "--problem_path",
+            "/input/problem.md",
+            "--solution_schema",
+            "/input/solution_schema.json",
+            "--instance_path",
+            "/input/instance.json",
+        ],
         mem_gb=mem_gb,
         timeout_s=config.TASK_TIMEOUT_SECONDS,
         log_path=log_dir / f"{paper_id}.log",
+        sandbox={
+            "python_env": config.BASELINE_PYTHON_ENV,
+            "output_dir": artifact_dir,
+            "task_data": task_dir,
+            "problem": config.problem_md_path(paper_id),
+            "solution_schema": config.solution_schema_path(paper_id),
+            "instance": instance_path,
+            "gurobi_home": config.GUROBI_HOME,
+        },
     )
     record.update(result)
+    raw_solution = artifact_dir / "raw_solution.json"
+    solution = artifact_dir / "solution.json"
+    record["raw_candidate_available"] = raw_solution.is_file()
+    record["solution_available"] = solution.is_file()
+    if raw_solution.is_file():
+        record["raw_solution_path"] = str(raw_solution)
+    if solution.is_file():
+        record["solution_path"] = str(solution)
     return record
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jobs", type=int, default=config.JOBS)
-    parser.add_argument("--budget-gb", type=int, default=config.TOTAL_BUDGET_GB)
     parser.add_argument("--only", nargs="*", help="restrict to these paper_ids")
-    parser.add_argument("--run-dir", type=Path, default=None, help="defaults to a new runs/ folder")
+    parser.add_argument(
+        "--run-dir", type=Path, default=None, help="defaults to a new runs/ folder"
+    )
     args = parser.parse_args()
 
-    # One knob. Per-task cap is the budget divided by how many run at once, so
-    # the whole run can never exceed the budget regardless of scheduling.
-    mem_gb = max(1, args.budget_gb // args.jobs)
+    mem_gb = config.TASK_MEM_GB
 
     cases = config.load_cases()
     if args.only:
@@ -95,8 +160,11 @@ def main() -> int:
     # hit the cap, and finishing the cheap cases first makes partial runs useful.
     ordered = sorted(cases.items(), key=lambda kv: kv[1]["instance_bytes"])
 
-    print(f"{len(ordered)} cases | jobs={args.jobs} | {mem_gb} GB per task "
-          f"| {config.TASK_TIMEOUT_SECONDS}s wall", flush=True)
+    print(
+        f"{len(ordered)} cases | jobs={args.jobs} | {mem_gb} GB per task "
+        f"| {config.TASK_TIMEOUT_SECONDS}s wall",
+        flush=True,
+    )
 
     run_dir = args.run_dir or config.new_run_dir()
     log_dir = run_dir / "logs"
@@ -115,8 +183,11 @@ def main() -> int:
                 try:
                     record = future.result()
                 except Exception as exc:  # noqa: BLE001
-                    record = {"paper_id": paper_id, "outcome": "scheduler_failed",
-                              "error": f"{type(exc).__name__}: {exc}"}
+                    record = {
+                        "paper_id": paper_id,
+                        "outcome": "scheduler_failed",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
                 out.write(json.dumps(record, ensure_ascii=False) + "\n")
                 out.flush()
                 print(f"  {paper_id:<20} {record.get('outcome', '?')}", flush=True)

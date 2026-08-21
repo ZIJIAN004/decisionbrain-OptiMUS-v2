@@ -19,7 +19,9 @@ DATA_ROOT = REPO_ROOT / "data" / "frontieror"
 # so every baseline's results sit together under one parent and nothing a run
 # produces is mixed into the checkout. Frozen conversions stay in DATA_ROOT:
 # they outlive any single run.
-RUNS_ROOT = Path(os.environ.get("ADAPTER_RUNS_ROOT", "/home/bhz/baselines/optimus-v2-runs"))
+RUNS_ROOT = Path(
+    os.environ.get("ADAPTER_RUNS_ROOT", "/home/bhz/baselines/optimus-v2-runs")
+)
 
 
 def new_run_dir(tag: str = "frontieror") -> Path:
@@ -30,6 +32,7 @@ def new_run_dir(tag: str = "frontieror") -> Path:
     (run_dir / "logs").mkdir(parents=True, exist_ok=True)
     return run_dir
 
+
 # --- FrontierOR sources (bhz host) -------------------------------------------
 INDEX_JSON = Path(
     os.environ.get(
@@ -37,7 +40,9 @@ INDEX_JSON = Path(
         "/home/bhz/Decision Brain/benchmarks/frontieror-large-all/index.json",
     )
 )
-INSTANCE_ROOT = Path(os.environ.get("FRONTIEROR_INSTANCE_ROOT", "/home/bhz/FrontierOR_all"))
+INSTANCE_ROOT = Path(
+    os.environ.get("FRONTIEROR_INSTANCE_ROOT", "/home/bhz/FrontierOR_all")
+)
 PROBLEM_ROOT = Path(
     os.environ.get(
         "FRONTIEROR_PROBLEM_ROOT",
@@ -46,11 +51,16 @@ PROBLEM_ROOT = Path(
 )
 
 # --- resource budget ---------------------------------------------------------
-# Measured on bhz: 128 GB total, ~123 GB available, shared with other users.
-# One knob (TOTAL_BUDGET) divided by parallelism gives the per-task cgroup cap.
-TOTAL_BUDGET_GB = int(os.environ.get("ADAPTER_TOTAL_BUDGET_GB", "100"))
-JOBS = int(os.environ.get("ADAPTER_JOBS", "4"))
-PER_TASK_MEM_GB = TOTAL_BUDGET_GB // JOBS
+# Every evaluated process receives the same cgroup limit. Concurrency is an
+# independent scheduling decision and must account for aggregate host capacity.
+TASK_MEM_GB = 100
+JOBS = int(os.environ.get("ADAPTER_JOBS", "1"))
+BASELINE_PYTHON_ENV = Path(
+    os.environ.get(
+        "ADAPTER_PYTHON_ENV", "/home/bhz/miniforge3/envs/decisionbrain_baseline"
+    )
+)
+GUROBI_HOME = Path(os.environ.get("GUROBI_HOME", "/home/bhz/gurobi1302/linux64"))
 
 # Matches DecisionBrain's --task-timeout-seconds 7200. No inner solver limit is
 # imposed: OptiMUS gets the full wall clock for solving, which favours the
@@ -65,11 +75,17 @@ CONVERTER_MODEL = os.environ.get("ADAPTER_CONVERTER_MODEL", "deepseek-v4-flash")
 
 
 def instance_path(paper_id: str, instance_index: int) -> Path:
-    return INSTANCE_ROOT / paper_id / "instance" / f"large_instance_{instance_index}.json"
+    return (
+        INSTANCE_ROOT / paper_id / "instance" / f"large_instance_{instance_index}.json"
+    )
 
 
 def problem_md_path(paper_id: str) -> Path:
     return PROBLEM_ROOT / paper_id / "input" / "problem.md"
+
+
+def solution_schema_path(paper_id: str) -> Path:
+    return PROBLEM_ROOT / paper_id / "hidden" / "solution_schema.json"
 
 
 def task_dir(paper_id: str) -> Path:
