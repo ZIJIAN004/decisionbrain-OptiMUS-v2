@@ -24,7 +24,7 @@ done
 
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 RUN_DIR="$RUNS_ROOT/$RUN_ID"
-mkdir -p "$RUN_DIR/logs"
+mkdir -p "$RUN_DIR"
 
 cd "$REPO"
 set -a; . "$ENV_FILE"; set +a
@@ -47,8 +47,7 @@ export ADAPTER_JOBS="$JOBS" ADAPTER_TOTAL_BUDGET_GB="$BUDGET_GB"
 # -u so console.log is readable while the run is still going.
 nohup "$PYTHON" -u -m adapters.frontieror.schedule \
     --jobs "$JOBS" --budget-gb "$BUDGET_GB" \
-    --output "$RUN_DIR/report.jsonl" \
-    --log-dir "$RUN_DIR/logs" \
+    --run-dir "$RUN_DIR" \
     "$@" \
     > "$RUN_DIR/console.log" 2>&1 &
 
