@@ -11,7 +11,7 @@ from agents.agent import Agent
 
 FORMATTER_PROMPT = """
 You convert a saved Gurobi incumbent into the required benchmark solution JSON.
-Return only Python code between ===== markers. The code must define:
+Call the `submit_formatter` tool with Python code defining:
 
     build_solution(raw_solution, data, instance) -> dict
 
@@ -41,8 +41,33 @@ Original instance structure:
 Available incumbent variable families and samples:
 {families}
 
-{feedback}
 """
+
+FORMATTER_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "submit_formatter",
+            "description": (
+                "Execute candidate-only conversion code and validate its result "
+                "against the required solution schema."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": (
+                            "Python code defining build_solution(raw_solution, data, instance)"
+                        ),
+                    }
+                },
+                "required": ["source"],
+                "additionalProperties": False,
+            },
+        },
+    }
+]
 
 
 class ResultFormatter(Agent):
@@ -56,7 +81,7 @@ class ResultFormatter(Agent):
             client=client,
             **kwargs,
         )
-        self.max_attempts = 1
+        self.max_tool_rounds = 10
 
     def generate_reply(self, task: str, state: dict, sender: Agent) -> tuple[str, dict]:
         raw_path = state.get("raw_solution_path")
@@ -88,26 +113,66 @@ class ResultFormatter(Agent):
             with open(problem_path, encoding="utf-8") as handle:
                 problem = handle.read()
 
-        feedback = ""
-        for attempt in range(1, self.max_attempts + 1):
-            prompt = FORMATTER_PROMPT.format(
-                problem=problem,
-                schema=json.dumps(schema, ensure_ascii=False, indent=2),
-                formulation=self._formulation_context(state),
-                data_summary=json.dumps(
-                    self._structure_summary(data), ensure_ascii=False, indent=2
-                ),
-                instance_summary=json.dumps(
-                    self._structure_summary(instance), ensure_ascii=False, indent=2
-                ),
-                families=json.dumps(
-                    self._variable_families(raw), ensure_ascii=False, indent=2
-                ),
-                feedback=feedback,
-            )
+        prompt = FORMATTER_PROMPT.format(
+            problem=problem,
+            schema=json.dumps(schema, ensure_ascii=False, indent=2),
+            formulation=self._formulation_context(state),
+            data_summary=json.dumps(
+                self._structure_summary(data), ensure_ascii=False, indent=2
+            ),
+            instance_summary=json.dumps(
+                self._structure_summary(instance), ensure_ascii=False, indent=2
+            ),
+            families=json.dumps(
+                self._variable_families(raw), ensure_ascii=False, indent=2
+            ),
+        )
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+        last_error = "ResultFormatter did not submit valid conversion code."
+        for tool_round in range(1, self.max_tool_rounds + 1):
+            calls = []
             try:
-                response = self.llm_call(prompt=prompt, seed=attempt)
-                source = self._extract_source(response)
+                completion = self.client.chat.completions.create(
+                    model=self.llm,
+                    messages=messages,
+                    tools=FORMATTER_TOOLS,
+                    tool_choice="auto",
+                )
+                message = completion.choices[0].message
+                calls = message.tool_calls or []
+                if not calls:
+                    last_error = "ValueError: call submit_formatter with complete conversion code"
+                    messages.extend(
+                        [
+                            {"role": "assistant", "content": message.content or ""},
+                            {"role": "user", "content": last_error},
+                        ]
+                    )
+                    continue
+                call = calls[0]
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": message.content,
+                        "tool_calls": [
+                            {
+                                "id": call.id,
+                                "type": "function",
+                                "function": {
+                                    "name": call.function.name,
+                                    "arguments": call.function.arguments,
+                                },
+                            }
+                        ],
+                    }
+                )
+                if call.function.name != "submit_formatter":
+                    raise ValueError(f"unknown tool: {call.function.name}")
+                arguments = json.loads(call.function.arguments)
+                source = arguments["source"]
                 namespace = {"json": json, "re": re}
                 exec(
                     compile(source, "<solution_formatter>", "exec"),
@@ -130,23 +195,37 @@ class ResultFormatter(Agent):
                     handle.write(source)
                 state["solution_path"] = output_path
                 state["solution_export_status"] = "completed"
-                state["solution_export_attempts"] = attempt
+                state["solution_export_tool_rounds"] = tool_round
                 return "Candidate incumbent was converted to solution.json.", state
             except Exception as exc:
-                feedback = f"Previous attempt failed: {type(exc).__name__}: {exc}"
+                last_error = f"{type(exc).__name__}: {exc}"
+                feedback = json.dumps(
+                    {
+                        "ok": False,
+                        "error": last_error,
+                        "instruction": "Correct the code and call submit_formatter again.",
+                    },
+                    ensure_ascii=False,
+                )
+                messages.append(
+                    (
+                        {
+                            "role": "tool",
+                            "tool_call_id": calls[0].id,
+                            "content": feedback,
+                        }
+                        if calls
+                        else {"role": "user", "content": feedback}
+                    )
+                )
 
         state["solution_export_status"] = "failed"
-        state["solution_export_error"] = feedback
+        state["solution_export_tool_rounds"] = self.max_tool_rounds
+        state["solution_export_error"] = last_error
         return (
             "The raw incumbent was preserved, but solution.json conversion failed.",
             state,
         )
-
-    @staticmethod
-    def _extract_source(response):
-        blocks = [part.strip() for part in response.split("=====") if part.strip()]
-        source = blocks[-1] if blocks else response.strip()
-        return source.replace("```python", "").replace("```", "").strip()
 
     @staticmethod
     def _formulation_context(state):

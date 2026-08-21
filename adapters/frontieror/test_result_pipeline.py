@@ -15,13 +15,19 @@ class FakeClient:
         self.completions = self
 
     def create(self, **kwargs):
-        content = next(self.replies)
-        message = type("Message", (), {"content": content})()
+        source = next(self.replies)
+        function = type(
+            "Function",
+            (),
+            {"name": "submit_formatter", "arguments": json.dumps({"source": source})},
+        )()
+        call = type("ToolCall", (), {"id": "call-1", "function": function})()
+        message = type("Message", (), {"content": None, "tool_calls": [call]})()
         choice = type("Choice", (), {"message": message})()
         return type("Completion", (), {"choices": [choice]})()
 
 
-def test_formatter_writes_solution_in_one_attempt():
+def test_formatter_corrects_schema_error_in_one_tool_session():
     root = Path(tempfile.mkdtemp())
     raw = root / "raw.json"
     data = root / "data.json"
@@ -45,14 +51,18 @@ def test_formatter_writes_solution_in_one_attempt():
     client = FakeClient(
         [
             (
-                "=====\ndef build_solution(raw_solution, data, instance):\n"
+                "def build_solution(raw_solution, data, instance):\n"
+                "    return {'wrong': 1}\n"
+            ),
+            (
+                "def build_solution(raw_solution, data, instance):\n"
                 "    return {'objective_value': raw_solution['objective_value'], "
-                "'selected': [0]}\n====="
+                "'selected': [0]}\n"
             ),
         ]
     )
     formatter = ResultFormatter(client=client, llm="fake")
-    assert formatter.max_attempts == 1
+    assert formatter.max_tool_rounds == 10
     state = {
         "raw_solution_path": str(raw),
         "target_solution_schema_path": str(schema),
@@ -67,7 +77,7 @@ def test_formatter_writes_solution_in_one_attempt():
     _, result = formatter.generate_reply("format", state, sender=None)
 
     assert result["solution_export_status"] == "completed"
-    assert result["solution_export_attempts"] == 1
+    assert result["solution_export_tool_rounds"] == 2
     assert json.loads((root / "solution.json").read_text()) == {
         "objective_value": 4.0,
         "selected": [0],
@@ -131,7 +141,7 @@ model = Model()
 
 
 if __name__ == "__main__":
-    test_formatter_writes_solution_in_one_attempt()
+    test_formatter_corrects_schema_error_in_one_tool_session()
     test_template_validation_rejects_missing_fields()
     test_evaluator_defaults_to_600_seconds()
     test_evaluator_captures_time_limit_incumbent()
