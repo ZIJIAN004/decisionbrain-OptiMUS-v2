@@ -44,7 +44,9 @@ TASK_TIMEOUT_SECONDS = int(os.environ.get("ADAPTER_TASK_TIMEOUT", "7200"))
 
 # Generation loop budget.
 MAX_GENERATION_ROUNDS = int(os.environ.get("ADAPTER_MAX_ROUNDS", "8"))
-CONVERTER_MODEL = os.environ.get("ADAPTER_CONVERTER_MODEL", "")
+# Fixed converter; deliberately not one of the models under evaluation, so
+# every evaluated model receives byte-identical input.
+CONVERTER_MODEL = os.environ.get("ADAPTER_CONVERTER_MODEL", "deepseek-v4-flash")
 
 
 def instance_path(paper_id: str, instance_index: int) -> Path:

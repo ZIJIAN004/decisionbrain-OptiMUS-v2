@@ -26,7 +26,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import config, manifest, validate
+from . import config, converter, manifest, validate
 from .validate import ValidationError
 
 EXPLORE_TIMEOUT_S = 900
@@ -120,10 +120,15 @@ def build_input_targets(staging: Path) -> None:
 def propose(problem_md: str, instance_path: Path, feedback: list[str], mem_gb: int) -> dict:
     """Ask the fixed converter model for transform.py / parameters.json / targets.json.
 
-    Returns {"transform.py": str, "parameters.json": str, "targets.json": str}.
-    Implemented in the prompt layer; `explore` is the tool it is given.
+    The converter inspects the instance through `explore` -- code it writes, run
+    by us -- so its description of the data is its own rather than a summary we
+    chose to show it.
     """
-    raise NotImplementedError("prompt layer not written yet")
+    return converter.converse(
+        problem_md,
+        lambda snippet: explore(snippet, instance_path, mem_gb),
+        feedback,
+    )
 
 
 def generate(paper_id: str, case: dict) -> dict:
@@ -169,7 +174,7 @@ def generate(paper_id: str, case: dict) -> dict:
                 instance_sha256=manifest.sha256_file(instance_path),
                 transform_sha256=manifest.sha256_file(staging / "transform.py"),
                 targets_sha256=manifest.sha256_file(staging / "input_targets.json"),
-                converter_model=config.CONVERTER_MODEL,
+                converter_model=converter.model_id(),
                 generation_rounds=attempt,
                 sanity_check_passed=True,
                 assertions=report,
