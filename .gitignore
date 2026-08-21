@@ -3,3 +3,4 @@ __pycache__/
 data/frontieror/*/data.json
 adapter-report.jsonl
 adapter-logs/
+runs/

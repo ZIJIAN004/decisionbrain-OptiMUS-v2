@@ -81,8 +81,7 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=config.JOBS)
     parser.add_argument("--budget-gb", type=int, default=config.TOTAL_BUDGET_GB)
     parser.add_argument("--only", nargs="*", help="restrict to these paper_ids")
-    parser.add_argument("--output", type=Path, default=Path("adapter-report.jsonl"))
-    parser.add_argument("--log-dir", type=Path, default=Path("adapter-logs"))
+    parser.add_argument("--run-dir", type=Path, default=None, help="defaults to a new runs/ folder")
     args = parser.parse_args()
 
     # One knob. Per-task cap is the budget divided by how many run at once, so
@@ -99,11 +98,16 @@ def main() -> int:
     print(f"{len(ordered)} cases | jobs={args.jobs} | {mem_gb} GB per task "
           f"| {config.TASK_TIMEOUT_SECONDS}s wall", flush=True)
 
-    args.log_dir.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8") as out:
+    run_dir = args.run_dir or config.new_run_dir()
+    log_dir = run_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    report_path = run_dir / "report.jsonl"
+    print(f"run dir: {run_dir}", flush=True)
+
+    with report_path.open("w", encoding="utf-8") as out:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
             futures = {
-                pool.submit(process_case, pid, case, mem_gb, args.log_dir): pid
+                pool.submit(process_case, pid, case, mem_gb, log_dir): pid
                 for pid, case in ordered
             }
             for future in concurrent.futures.as_completed(futures):

@@ -15,6 +15,20 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = REPO_ROOT / "data" / "frontieror"
 
+# Everything a run produces lives under one directory inside the baseline repo,
+# so results are not scattered across /tmp and a run can be archived by copying
+# a single folder. Frozen conversions stay in DATA_ROOT: they outlive any run.
+RUNS_ROOT = Path(os.environ.get("ADAPTER_RUNS_ROOT", REPO_ROOT / "runs"))
+
+
+def new_run_dir(tag: str = "frontieror") -> Path:
+    """runs/<tag>-<UTC timestamp>/ with report.jsonl and logs/ inside it."""
+    import time
+
+    run_dir = RUNS_ROOT / f"{tag}-{time.strftime('%Y%m%d-%H%M%SZ', time.gmtime())}"
+    (run_dir / "logs").mkdir(parents=True, exist_ok=True)
+    return run_dir
+
 # --- FrontierOR sources (bhz host) -------------------------------------------
 INDEX_JSON = Path(
     os.environ.get(
