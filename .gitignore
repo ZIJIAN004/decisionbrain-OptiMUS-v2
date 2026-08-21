@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+data/frontieror/*/data.json
+adapter-report.jsonl
+adapter-logs/
