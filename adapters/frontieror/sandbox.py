@@ -10,16 +10,18 @@ class SandboxConfigurationError(ValueError):
     pass
 
 
-def build_scope_command(command: list[str], mem_gb: int, cpu_cores: int) -> list[str]:
+def build_scope_command(
+    command: list[str], cpu_cores: int, cgroup_slice: str
+) -> list[str]:
+    if not cgroup_slice.endswith(".slice"):
+        raise SandboxConfigurationError("cgroup slice must end with .slice")
     return [
         "systemd-run",
         "--user",
         "--scope",
         "-q",
-        "-p",
-        f"MemoryMax={mem_gb}G",
-        "-p",
-        "MemorySwapMax=0",
+        "--slice",
+        cgroup_slice.removesuffix(".slice"),
         "-p",
         f"CPUQuota={cpu_cores * 100}%",
         *command,

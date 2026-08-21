@@ -22,14 +22,12 @@ from pathlib import Path
 
 from .sandbox import build_command, build_scope_command, configured_license_file
 
-# Verified on bhz (systemd 255, cgroup v2 with the memory controller): a process
-# that exceeds MemoryMax is SIGKILLed inside its own scope and the host is
-# unaffected. gurobipy is an in-process library, so Gurobi's allocations count
-# towards this cap, and the scope covers every descendant.
+# Every task scope joins the run-level parent slice. The parent owns the shared
+# MemoryMax, while this scope owns only the per-task CPU quota.
 def run_capped(
     command: list[str],
-    mem_gb: int,
     cpu_cores: int,
+    cgroup_slice: str,
     timeout_s: int,
     cwd: Path,
     log_path: Path,
@@ -45,7 +43,7 @@ def run_capped(
         if sandbox is not None
         else command
     )
-    argv = build_scope_command(supervised, mem_gb, cpu_cores)
+    argv = build_scope_command(supervised, cpu_cores, cgroup_slice)
     started = time.time()
     timed_out = False
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +66,8 @@ def run_capped(
         "cpu_user_s": round(usage.ru_utime, 1),
         "cpu_sys_s": round(usage.ru_stime, 1),
         "wall_s": round(time.time() - started, 1),
-        "mem_cap_gb": mem_gb,
+        "memory_pool_gb": 100,
+        "memory_cgroup_slice": cgroup_slice,
         "cpu_cap_cores": cpu_cores,
         "timeout_s": timeout_s,
         "log": str(log_path),
@@ -89,8 +88,8 @@ def classify(returncode: int, timed_out: bool) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mem-gb", type=int, required=True)
     parser.add_argument("--cpu-cores", type=int, required=True)
+    parser.add_argument("--cgroup-slice", required=True)
     parser.add_argument("--timeout", type=int, required=True)
     parser.add_argument("--cwd", type=Path, required=True)
     parser.add_argument("--log", type=Path, required=True)
@@ -130,8 +129,8 @@ def main() -> int:
         sandbox = required
     record = run_capped(
         command,
-        args.mem_gb,
         args.cpu_cores,
+        args.cgroup_slice,
         args.timeout,
         args.cwd,
         args.log,

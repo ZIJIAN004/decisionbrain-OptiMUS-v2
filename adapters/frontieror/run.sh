@@ -17,6 +17,14 @@ ENV_FILE="${ENV_FILE:-/home/bhz/Decision Brain/.env}"
 PYTHON="${PYTHON:-/home/bhz/miniforge3/envs/decisionbrain_baseline/bin/python}"
 JOBS="${JOBS:-1}"
 
+case "$JOBS" in
+    ''|*[!0-9]*) echo "JOBS must be an integer from 1 to 24" >&2; exit 1 ;;
+esac
+if [ "$JOBS" -lt 1 ] || [ "$JOBS" -gt 24 ]; then
+    echo "JOBS must be an integer from 1 to 24" >&2
+    exit 1
+fi
+
 for path in "$REPO" "$ENV_FILE" "$PYTHON"; do
     [ -e "$path" ] || { echo "missing: $path" >&2; exit 1; }
 done
@@ -28,6 +36,10 @@ mkdir -p "$RUN_DIR"
 cd "$REPO"
 set -a; . "$ENV_FILE"; set +a
 export ADAPTER_JOBS="$JOBS"
+CGROUP_SLICE="optimus-${RUN_ID}.slice"
+export ADAPTER_CGROUP_SLICE="$CGROUP_SLICE"
+systemctl --user set-property --runtime "$CGROUP_SLICE" \
+    MemoryMax=100G MemorySwapMax=0
 
 # What produced these numbers, written next to them. A report without the commit
 # and the model that made it cannot be compared against anything later.
@@ -37,14 +49,17 @@ export ADAPTER_JOBS="$JOBS"
     echo "host       $(hostname)"
     echo "python     $PYTHON"
     echo "jobs       $JOBS"
-    echo "memory_gb  100 total, divided across jobs"
+    echo "memory_gb  100 shared parent cgroup"
+    echo "cgroup     $CGROUP_SLICE"
     echo "solver_llm ${LLM_CHAT_MODEL:-unset}"
     echo "converter  ${ADAPTER_CONVERTER_MODEL:-deepseek-v4-flash}"
     echo "args       $*"
 } > "$RUN_DIR/run.info"
 
 # -u so console.log is readable while the run is still going.
-nohup "$PYTHON" -u -m adapters.frontieror.schedule \
+nohup systemd-run --user --scope -q \
+    --slice "${CGROUP_SLICE%.slice}" \
+    "$PYTHON" -u -m adapters.frontieror.schedule \
     --jobs "$JOBS" \
     --run-dir "$RUN_DIR" \
     "$@" \

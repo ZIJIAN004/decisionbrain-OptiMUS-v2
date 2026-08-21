@@ -10,18 +10,18 @@ from adapters.frontieror.sandbox import build_command, build_scope_command
 
 def test_sandbox_exposes_only_current_case_inputs():
     assert config.TOTAL_MEM_GB == 100
-    assert config.task_memory_gb(1) == 100
-    assert config.task_memory_gb(4) == 25
-    assert config.task_memory_gb(6) == 16
     assert config.solver_threads(1) == 32
     assert config.solver_threads(4) == 8
     assert config.solver_threads(5) == 6
     assert config.process_cpu_cores(1) == 24
     assert config.process_cpu_cores(4) == 6
     assert config.process_cpu_cores(5) == 4
-    scope = build_scope_command(["python", "run.py"], mem_gb=100, cpu_cores=6)
-    assert "MemoryMax=100G" in scope
+    scope = build_scope_command(
+        ["python", "run.py"], cpu_cores=6, cgroup_slice="optimus-test.slice"
+    )
     assert "CPUQuota=600%" in scope
+    assert "optimus-test" in scope
+    assert not any("MemoryMax" in item for item in scope)
     root = Path(tempfile.mkdtemp())
     repo = root / "repo"
     python_env = root / "python-env"

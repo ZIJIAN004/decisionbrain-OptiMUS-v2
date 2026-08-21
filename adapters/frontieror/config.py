@@ -55,6 +55,7 @@ TOTAL_MEM_GB = 100
 LOGICAL_CPUS = 32
 PHYSICAL_CORES = 24
 JOBS = int(os.environ.get("ADAPTER_JOBS", "1"))
+CGROUP_SLICE = os.environ.get("ADAPTER_CGROUP_SLICE", "")
 BASELINE_PYTHON_ENV = Path(
     os.environ.get(
         "ADAPTER_PYTHON_ENV", "/home/bhz/miniforge3/envs/decisionbrain_baseline"
@@ -69,12 +70,6 @@ def solver_threads(jobs: int) -> int:
     return max(1, LOGICAL_CPUS // jobs)
 
 
-def task_memory_gb(jobs: int) -> int:
-    if jobs < 1:
-        raise ValueError("jobs must be at least 1")
-    return max(1, TOTAL_MEM_GB // jobs)
-
-
 def process_cpu_cores(jobs: int) -> int:
     if jobs < 1:
         raise ValueError("jobs must be at least 1")
@@ -83,9 +78,9 @@ def process_cpu_cores(jobs: int) -> int:
     return PHYSICAL_CORES // jobs
 
 
-# Matches DecisionBrain's --task-timeout-seconds 7200. No inner solver limit is
-# imposed: OptiMUS gets the full wall clock for solving, which favours the
-# baseline relative to DecisionBrain's SOLVER_TIMEOUT=600.
+# Matches DecisionBrain's --task-timeout-seconds 7200. The Evaluator separately
+# gives Gurobi a 600-second TimeLimit so an incumbent can be formatted before
+# this outer task deadline.
 TASK_TIMEOUT_SECONDS = int(os.environ.get("ADAPTER_TASK_TIMEOUT", "7200"))
 
 # Generation loop budget.

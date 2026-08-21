@@ -24,7 +24,6 @@ from . import config, manifest
 
 def _run_wrapper(
     command: list[str],
-    mem_gb: int,
     cpu_cores: int,
     timeout_s: int,
     log_path: Path,
@@ -35,10 +34,10 @@ def _run_wrapper(
         sys.executable,
         "-m",
         "adapters.frontieror.wrapper",
-        "--mem-gb",
-        str(mem_gb),
         "--cpu-cores",
         str(cpu_cores),
+        "--cgroup-slice",
+        config.CGROUP_SLICE,
         "--timeout",
         str(timeout_s),
         "--cwd",
@@ -83,7 +82,6 @@ def _run_wrapper(
 def process_case(
     paper_id: str,
     case: dict,
-    mem_gb: int,
     cpu_cores: int,
     solver_threads: int,
     log_dir: Path,
@@ -101,7 +99,7 @@ def process_case(
         from .generate import generate  # imported late: only this path needs an LLM
 
         try:
-            record["conversion"] = generate(paper_id, case, mem_gb)
+            record["conversion"] = generate(paper_id, case)
         except Exception as exc:  # noqa: BLE001
             record["outcome"] = "adapter_failed"
             record["error"] = f"{type(exc).__name__}: {exc}"
@@ -130,7 +128,6 @@ def process_case(
             "--solver_threads",
             str(solver_threads),
         ],
-        mem_gb=mem_gb,
         cpu_cores=cpu_cores,
         timeout_s=config.TASK_TIMEOUT_SECONDS,
         log_path=log_dir / f"{paper_id}.log",
@@ -165,7 +162,8 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    mem_gb = config.task_memory_gb(args.jobs)
+    if not config.CGROUP_SLICE:
+        raise ValueError("ADAPTER_CGROUP_SLICE is required; launch through run.sh")
     solver_threads = config.solver_threads(args.jobs)
     cpu_cores = config.process_cpu_cores(args.jobs)
     for variable in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
@@ -179,7 +177,7 @@ def main() -> int:
     ordered = sorted(cases.items(), key=lambda kv: kv[1]["instance_bytes"])
 
     print(
-        f"{len(ordered)} cases | jobs={args.jobs} | {mem_gb} GB per task "
+        f"{len(ordered)} cases | jobs={args.jobs} | {config.TOTAL_MEM_GB} GB shared "
         f"| {solver_threads} solver threads per task "
         f"| {cpu_cores} cgroup CPU cores per task "
         f"| {config.TASK_TIMEOUT_SECONDS}s wall",
@@ -199,7 +197,6 @@ def main() -> int:
                     process_case,
                     pid,
                     case,
-                    mem_gb,
                     cpu_cores,
                     solver_threads,
                     log_dir,

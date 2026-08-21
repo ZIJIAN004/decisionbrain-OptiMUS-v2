@@ -37,7 +37,7 @@ class ConversionFailed(Exception):
     """The converter did not produce an accepted conversion within its budget."""
 
 
-def explore(snippet: str, instance_path: Path, mem_gb: int) -> str:
+def explore(snippet: str, instance_path: Path) -> str:
     """Execute converter-written inspection code against the instance.
 
     The snippet is handed the parsed instance as ``data`` and may print whatever
@@ -60,10 +60,10 @@ def explore(snippet: str, instance_path: Path, mem_gb: int) -> str:
                 sys.executable,
                 "-m",
                 "adapters.frontieror.wrapper",
-                "--mem-gb",
-                str(mem_gb),
                 "--cpu-cores",
                 str(config.process_cpu_cores(config.JOBS)),
+                "--cgroup-slice",
+                config.CGROUP_SLICE,
                 "--timeout",
                 str(EXPLORE_TIMEOUT_S),
                 "--cwd",
@@ -92,17 +92,17 @@ def explore(snippet: str, instance_path: Path, mem_gb: int) -> str:
         script.with_suffix(".log").unlink(missing_ok=True)
 
 
-def run_transform(staging: Path, instance_path: Path, mem_gb: int) -> None:
+def run_transform(staging: Path, instance_path: Path) -> None:
     """Execute the converter's transform.py to produce data.json."""
     proc = subprocess.run(
         [
             sys.executable,
             "-m",
             "adapters.frontieror.wrapper",
-            "--mem-gb",
-            str(mem_gb),
             "--cpu-cores",
             str(config.process_cpu_cores(config.JOBS)),
+            "--cgroup-slice",
+            config.CGROUP_SLICE,
             "--timeout",
             str(TRANSFORM_TIMEOUT_S),
             "--cwd",
@@ -161,9 +161,7 @@ def build_input_targets(staging: Path) -> None:
     )
 
 
-def propose(
-    problem_md: str, instance_path: Path, feedback: list[str], mem_gb: int
-) -> dict:
+def propose(problem_md: str, instance_path: Path, feedback: list[str]) -> dict:
     """Ask the fixed converter model for transform.py / parameters.json / targets.json.
 
     The converter inspects the instance through `explore` -- code it writes, run
@@ -172,12 +170,12 @@ def propose(
     """
     return converter.converse(
         problem_md,
-        lambda snippet: explore(snippet, instance_path, mem_gb),
+        lambda snippet: explore(snippet, instance_path),
         feedback,
     )
 
 
-def generate(paper_id: str, case: dict, mem_gb: int) -> dict:
+def generate(paper_id: str, case: dict) -> dict:
     instance_path = config.instance_path(paper_id, case["instance_index"])
     problem_md = config.problem_md_path(paper_id).read_text(encoding="utf-8")
     # Parsed once and reused by every assertion; the largest case measured
@@ -194,14 +192,14 @@ def generate(paper_id: str, case: dict, mem_gb: int) -> dict:
             tempfile.mkdtemp(dir=staging_root, prefix=f".staging-{paper_id}-")
         )
         try:
-            answer = propose(problem_md, instance_path, feedback, mem_gb)
+            answer = propose(problem_md, instance_path, feedback)
             for name, text in answer.items():
                 (staging / name).write_text(text, encoding="utf-8")
 
-            run_transform(staging, instance_path, mem_gb)
+            run_transform(staging, instance_path)
             build_input_targets(staging)
             report, coverage = validate.validate(
-                staging, instance, lambda: run_transform(staging, instance_path, mem_gb)
+                staging, instance, lambda: run_transform(staging, instance_path)
             )
         except ValidationError as exc:
             feedback.append(str(exc))
