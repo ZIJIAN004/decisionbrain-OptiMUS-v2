@@ -16,13 +16,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = REPO_ROOT / "data" / "frontieror"
 
 # Everything a run produces lives under one directory inside the baseline repo,
-# so results are not scattered across /tmp and a run can be archived by copying
-# a single folder. Frozen conversions stay in DATA_ROOT: they outlive any run.
-RUNS_ROOT = Path(os.environ.get("ADAPTER_RUNS_ROOT", REPO_ROOT / "runs"))
+# so every baseline's results sit together under one parent and nothing a run
+# produces is mixed into the checkout. Frozen conversions stay in DATA_ROOT:
+# they outlive any single run.
+RUNS_ROOT = Path(os.environ.get("ADAPTER_RUNS_ROOT", "/home/bhz/baselines/optimus-v2-runs"))
 
 
 def new_run_dir(tag: str = "frontieror") -> Path:
-    """runs/<tag>-<UTC timestamp>/ with report.jsonl and logs/ inside it."""
+    """RUNS_ROOT/<tag>-<UTC timestamp>/ with report.jsonl and logs/ inside it."""
     import time
 
     run_dir = RUNS_ROOT / f"{tag}-{time.strftime('%Y%m%d-%H%M%SZ', time.gmtime())}"
